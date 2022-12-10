@@ -1,0 +1,141 @@
+<!--
+  Licensed to the Apache Software Foundation (ASF) under one
+  or more contributor license agreements.  See the NOTICE file
+  distributed with this work for additional information
+  regarding copyright ownership.  The ASF licenses this file
+  to you under the Apache License, Version 2.0 (the
+  "License"); you may not use this file except in compliance
+  with the License.  You may obtain a copy of the License at
+
+       http://www.apache.org/licenses/LICENSE-2.0
+
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+-->
+<assembly>
+    <id>distro</id>
+    <formats>
+        <format>dir</format>
+        <format>tar.gz</format>
+    </formats>
+    <includeBaseDirectory>true</includeBaseDirectory>
+    <baseDirectory>oozie-${project.version}</baseDirectory>
+    <fileSets>
+        <!-- Oozie configuration files -->
+        <fileSet>
+            <directory>${basedir}/../core/src/main/conf/</directory>
+            <outputDirectory>/conf</outputDirectory>
+            <includes>
+                <include>**</include>
+            </includes>
+        </fileSet>
+        <!-- Distro files, readme, licenses, etc -->
+        <fileSet>
+            <directory>${basedir}/../</directory>
+            <outputDirectory>/</outputDirectory>
+            <includes>
+                <include>LICENSE.txt</include>
+                <include>NOTICE.txt</include>
+                <include>README.md</include>
+                <include>release-log.txt</include>
+            </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${basedir}/src/main/bin</directory>
+            <outputDirectory>/bin</outputDirectory>
+            <includes>
+                <include>*</include>
+            </includes>
+            <fileMode>0755</fileMode>
+        </fileSet>
+        <!-- Client -->
+        <fileSet>
+            <directory>${basedir}/../client/target/oozie-client-${project.version}-client/oozie-client-${project.version}/bin</directory>
+            <outputDirectory>/bin</outputDirectory>
+            <includes>
+                <include>*</include>
+            </includes>
+            <fileMode>0755</fileMode>
+        </fileSet>
+        <!-- Tools -->
+        <fileSet>
+            <directory>${basedir}/../tools/target/oozie-tools-${project.version}-tools/oozie-tools-${project.version}/bin</directory>
+            <outputDirectory>/bin</outputDirectory>
+            <includes>
+                <include>*</include>
+            </includes>
+            <fileMode>0755</fileMode>
+        </fileSet>
+        <fileSet>
+            <directory>${basedir}/../tools/target/oozie-tools-${project.version}-tools/oozie-tools-${project.version}/libtools</directory>
+            <outputDirectory>/libtools</outputDirectory>
+            <includes>
+                <include>*</include>
+            </includes>
+        </fileSet>
+        <!-- Oozie Server - embedded jetty -->
+        <fileSet>
+                <directory>${basedir}/../server/target/</directory>
+                <outputDirectory>/embedded-oozie-server</outputDirectory>
+                <includes>
+                    <include>oozie-server*.jar</include>
+                    <include>**/jetty*-${jetty.version}.jar</include>
+                    <include>**/mail*.jar</include>
+                    <include>**/apache*.jar</include>
+                    <include>**/javax.servlet-api-3.1.0.jar</include>
+                    <include>**/taglibs-*jar</include>
+                    <include>**/org.eclipse.jdt.core-*jar</include>
+                </includes>
+        </fileSet>
+        <fileSet>
+            <directory>${basedir}/../webapp/target/oozie-webapp-${project.version}</directory>
+            <outputDirectory>/embedded-oozie-server/webapp</outputDirectory>
+            <excludes>
+                <exclude>**/web.xml</exclude>
+            </excludes>
+        </fileSet>
+    </fileSets>
+    <files>
+        <!-- Oozie configuration files -->
+        <file>
+            <source>${basedir}/../core/src/main/resources/oozie-default.xml</source>
+            <outputDirectory>/conf</outputDirectory>
+        </file>
+        <!-- Oozie core jar -->
+        <file>
+            <source>${basedir}/../core/target/oozie-core-${project.version}.jar</source>
+            <outputDirectory>/oozie-core</outputDirectory>
+        </file>
+        <!-- Oozie core test jar -->
+        <file>
+            <source>${basedir}/../core/target/oozie-core-${project.version}-tests.jar</source>
+            <outputDirectory>/oozie-core</outputDirectory>
+        </file>
+        <!-- Oozie Documentation -->
+        <file>
+            <source>${basedir}/../docs/target/oozie-docs-${project.version}-docs.zip</source>
+            <outputDirectory>/</outputDirectory>
+            <destName>docs.zip</destName>
+        </file>
+        <!-- Oozie Client TAR.GZ  -->
+        <file>
+            <source>${basedir}/../client/target/oozie-client-${project.version}-client.tar.gz</source>
+            <outputDirectory>/</outputDirectory>
+            <destName>oozie-client-${project.version}.tar.gz</destName>
+        </file>
+        <!-- Oozie examples TAR.GZ  -->
+        <file>
+            <source>${basedir}/../examples/target/oozie-examples-${project.version}-examples.tar.gz</source>
+            <outputDirectory>/</outputDirectory>
+            <destName>oozie-examples.tar.gz</destName>
+        </file>
+        <!-- Oozie sharelib TAR.GZ  -->
+        <file>
+            <source>${basedir}/../sharelib/target/oozie-sharelib-${project.version}.tar.gz</source>
+            <outputDirectory>/</outputDirectory>
+        </file>
+    </files>
+</assembly>

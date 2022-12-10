@@ -1,0 +1,229 @@
+#!/usr/bin/env bash
+#
+#   Licensed under the Apache License, Version 2.0 (the "License");
+#   you may not use this file except in compliance with the License.
+#   You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+#   Unless required by applicable law or agreed to in writing, software
+#   distributed under the License is distributed on an "AS IS" BASIS,
+#   WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+#   See the License for the specific language governing permissions and
+#   limitations under the License.
+
+if [ "${TESTPATCHDEBUG}" == "true" ] ; then
+  set -x
+fi
+
+TASKNAME="TESTS"
+OP=""
+TEMPDIR=""
+REPORTDIR=""
+SUMMARYFILE=""
+SUMMARYFILEFULL=""
+STDOUT="/dev/null"
+MVNPASSTHRU=""
+FLAKY_LIMIT=10
+TIMEOUT_MSG="There was a timeout or other error in the fork"
+TEST_FAILURE_PER_PROJECT=5
+
+###############################################################################
+cleanupAndExit() {
+  exit "$1"
+}
+
+printUsage() {
+  echo "Usage: $0 --taskname | (--op=pre|post|report --tempdir=<TEMP DIR> --reportdir=<REPORT DIR> --summaryfile=<SUMMARY FILE> --summaryfile-full=<FULL SUMMARY FILE>) [--verbose] [-D<VALUE>...] [-P<VALUE>...]"
+  echo
+}
+
+parseArgs() {
+  for i in "$@"
+  do
+    case $i in
+    --taskname)
+      echo ${TASKNAME}
+      exit 0
+      ;;
+    --op=*)
+      OP=${i#*=}
+      ;;
+    --tempdir=*)
+      TEMPDIR=${i#*=}
+      TESTS_OUT="${TEMPDIR}/${TASKNAME}.out"
+      TEST_RESULTS_DIR="${TEMPDIR}/${TASKNAME}/results"
+      ;;
+    --reportdir=*)
+      REPORTDIR=${i#*=}
+      ;;
+    --summaryfile=*)
+      SUMMARYFILE=${i#*=}
+      ;;
+    --summaryfile-full=*)
+      SUMMARYFILEFULL=${i#*=}
+      ;;
+     --verbose)
+      STDOUT="/dev/stdout"
+      ;;
+    -D*)
+      MVNPASSTHRU="${MVNPASSTHRU} $i"
+      ;;
+    -P*)
+      MVNPASSTHRU="${MVNPASSTHRU} $i"
+      ;;
+    esac
+  done
+  if [[ "${TASKNAME}" == "" || "${OP}" == "" || "${TEMPDIR}" == "" || "${REPORTDIR}" == "" || "${SUMMARYFILE}" == "" ]] ; then
+    echo "Missing options"
+    echo
+    printUsage
+    cleanupAndExit 1
+  fi
+  if [[ "${OP}" != "pre" && "${OP}" != "post" && "${OP}" != "report" ]] ; then
+    echo "Invalid operation"
+    echo
+    printUsage
+    cleanupAndExit 1
+  fi
+}
+
+count_test_result_type() {
+  local type=$1
+  local path=$2
+  find "${path}" -name "TEST-*.xml" -exec sh -c 'xmllint --xpath "string(//testsuite/@'"${type}"')" $1; echo' _ {} \; \
+  |  awk 'BEGIN {count=0} {count=count+$1} END {print count}';
+}
+
+run_tests() {
+  export MAVEN_OPTS="${MVNPASSTHRU} \
+        -Dmaven.test.failure.ignore=true \
+        -Doozie.test.waitfor.ratio=3 \
+        -Dtest.timeout=7200 \
+        -Dsurefire.rerunFailingTestsCount=1 \
+        ${MAVEN_OPTS}"
+  mvn test -fae | tee "${TESTS_OUT}" >> "$STDOUT"
+  local exitCode=${PIPESTATUS[0]}
+
+  grep -b1 -e "Run .: PASS" "${TESTS_OUT}" | grep Test | cut -d':' -f2 \
+  | awk '{print $1}' > "${TEMPDIR}/${TASKNAME}.flakies.out"
+
+  if [ "${PIPESTATUS[0]}" -eq "0" ]; then
+    isTestsFlaky=1
+    sed -i -e "s/\./#/g" "${TEMPDIR}/${TASKNAME}.flakies.out"
+  else
+    isTestsFlaky=0
+  fi
+
+  if [ "${isTestsFlaky}" -eq "1" ]; then
+    echo "There are flaky tests."
+  else
+    rm "${TEMPDIR}/${TASKNAME}.flakies.out"
+
+    if [ "${exitCode}" -eq 0 ]; then
+      echo "All tests passed."
+    else
+      echo "Tests failed."
+    fi
+  fi
+
+  echo "$exitCode" >  "${TEMPDIR}/${TASKNAME}.exitCode"
+}
+
+save_failures() {
+    if [ ! -d "$TEST_RESULTS_DIR" ]; then
+      mkdir -p "${TEST_RESULTS_DIR}"
+    fi
+
+    rsync -qR $(find . -name  'TEST*.xml' ! -path '*/test-patch/*' -print0 | xargs -0 grep -El '<error|<failure') "${TEST_RESULTS_DIR}"
+}
+
+print_flakies() {
+  if [ -f "${TEMPDIR}/${TASKNAME}.flakies.out" ]; then
+    echo ".    {color:orange}Tests failed at first run:{color}"
+    local limit="${1}"
+    if [ -n "${limit}" ]; then
+      cat "${TEMPDIR}/${TASKNAME}.flakies.out" | head -"${limit}"
+      echo ".    For the complete list of flaky tests, see TEST-SUMMARY-FULL files."
+    else
+      cat "${TEMPDIR}/${TASKNAME}.flakies.out"
+    fi
+  fi
+}
+
+print_flakies_short() {
+  print_flakies "${FLAKY_LIMIT}"
+}
+
+print_flakies_full() {
+  print_flakies
+}
+
+printTestFailures() {
+    failurePattern=$1
+    failureType=$2
+
+    for path in "${TEST_RESULTS_DIR}"/* ; do
+        [ -d "${path}" ] || continue # if not a directory, skip
+        module="$(basename "${path}")"
+        totalFailedTestsInModule=$(count_test_result_type "$failureType" "$path")
+        if [[ ${totalFailedTestsInModule} != 0 ]] ; then
+            echo "{color:red}-1{color} [ERROR] There are [${totalFailedTestsInModule}] test ${failureType} in [${module}]. Listing only the first [${TEST_FAILURE_PER_PROJECT}] ones"
+            failures=$(find "${path}" -name 'TEST*.xml'  -print0 | xargs grep -hB1 "${failurePattern}" | grep -Evm"${TEST_FAILURE_PER_PROJECT}" "${failurePattern}|--" | cut -d \" -f4,2 | sed 's/"/:/g' )
+            echo "${failures}"
+        fi
+    done
+}
+
+generate_report() {
+    testsRun=$(grep "Tests run:" "${TESTS_OUT}" | grep -v " Time elapsed:" | awk '{print $4}' | sed 's/,//' | awk 'BEGIN {count=0} {count=count+$1} END {print count}')
+    testsFailed=$(count_test_result_type failures "${TEST_RESULTS_DIR}")
+    testsErrors=$(count_test_result_type errors "${TEST_RESULTS_DIR}")
+    timeout=$(grep -c "${TIMEOUT_MSG}" "${TESTS_OUT}")
+    hasFailures=$((testsFailed + testsErrors + timeout))
+    testsExitCode=$(cat "${TEMPDIR}/${TASKNAME}.exitCode")
+
+    if [[ ${hasFailures} != 0 ]] ; then
+        echo "{color:red}-1 ${TASKNAME}{color}"
+        echo ".    Tests run        : $testsRun"
+        echo ".    Tests failed     : $testsFailed"
+        echo ".    Tests in error   : $testsErrors"
+        echo ".    Tests timed out  : $timeout"
+        echo ""
+        if [[ ${testsFailed} != 0 ]] ; then
+            printTestFailures "<failure" failures
+            echo ""
+        fi
+        if [[ ${testsErrors} != 0 ]] ; then
+            printTestFailures "<error" errors
+            echo ""
+        fi
+        echo "Check console output for the full list of errors/failures"
+    else
+        if [[ "${testsExitCode}" != "0" ]] ; then
+            echo "{color:red}-1 ${TASKNAME}{color} - patch does not compile, cannot run test cases"
+        else
+            echo "{color:green}+1 ${TASKNAME}{color}"
+            echo ".    Tests run: $testsRun"
+        fi
+    fi
+}
+###############################################################################
+
+parseArgs "$@"
+
+case $OP in
+  pre)
+    ;;
+  post)
+    run_tests
+    save_failures
+    ;;
+  report)
+    generate_report >> "${SUMMARYFILE}"
+    print_flakies_short >> "${SUMMARYFILE}"
+    print_flakies_full >> "${SUMMARYFILEFULL}"
+    ;;
+esac
+
+exit 0
